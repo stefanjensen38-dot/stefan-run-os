@@ -150,12 +150,19 @@ def refresh_access_token() -> dict:
 def get_valid_token() -> str:
     """Return a valid Strava access token, refreshing if expired.
 
-    On Streamlit Cloud: always refreshes using STRAVA_REFRESH_TOKEN from secrets.
+    On Streamlit Cloud: refreshes using STRAVA_REFRESH_TOKEN from secrets,
+    caching the result in session_state so we only refresh once per session.
     Locally: reads tokens.json, refreshes if expired.
     """
     if _is_cloud():
         import streamlit as st
+        cached = st.session_state.get("_strava_token")
+        cached_exp = st.session_state.get("_strava_token_exp", 0)
+        if cached and time.time() < cached_exp - 60:
+            return cached
         data = _do_refresh(st.secrets["STRAVA_REFRESH_TOKEN"])
+        st.session_state["_strava_token"] = data["access_token"]
+        st.session_state["_strava_token_exp"] = data["expires_at"]
         return data["access_token"]
 
     if not TOKENS_PATH.exists():
