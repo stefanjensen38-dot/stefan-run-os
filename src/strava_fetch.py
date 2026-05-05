@@ -219,8 +219,12 @@ def _compute_weekly_summaries(week_starts: list[date]) -> None:
     con.close()
 
 
-def sync(backfill: bool = False) -> None:
-    """Sync Strava activities to the local database."""
+def sync(backfill: bool = False, streams_days: int = 120) -> None:
+    """Sync Strava activities to the local database.
+
+    backfill=True fetches all activity metadata but limits streams to
+    the most recent streams_days days to avoid Strava rate limits.
+    """
     create_tables()
 
     after_ts = None
@@ -248,8 +252,16 @@ def sync(backfill: bool = False) -> None:
     upsert_activities(acts_df)
     print(f"Saved {len(acts_df)} activities.")
 
+    # Only fetch streams for recent activities to stay within Strava rate limits
+    streams_cutoff = pd.Timestamp.now() - pd.Timedelta(days=streams_days)
+    recent = acts_df[pd.to_datetime(acts_df["start_date"]) >= streams_cutoff]
+    older = acts_df[pd.to_datetime(acts_df["start_date"]) < streams_cutoff]
+
+    if not older.empty:
+        print(f"  Skipping streams for {len(older)} older activities (>{streams_days}d ago).")
+
     affected_weeks = set()
-    for _, row in acts_df.iterrows():
+    for _, row in recent.iterrows():
         activity_id = int(row["id"])
         name = row["name"]
         distance_m = row["distance_m"]
@@ -262,8 +274,10 @@ def sync(backfill: bool = False) -> None:
 
         affected_weeks.add(row["week_start"])
 
-    print(f"Recomputing weekly summaries for {len(affected_weeks)} week(s)...")
-    _compute_weekly_summaries(list(affected_weeks))
+    # Still recompute weekly summaries for all activity weeks
+    all_weeks = set(acts_df["week_start"].tolist())
+    print(f"Recomputing weekly summaries for {len(all_weeks)} week(s)...")
+    _compute_weekly_summaries(list(all_weeks))
     print("Sync complete.")
 
 
