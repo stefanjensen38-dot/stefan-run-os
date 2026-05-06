@@ -149,6 +149,16 @@ with st.sidebar:
         st.success("Done")
 
     st.divider()
+    with st.expander("⬆ Upload local database"):
+        uploaded = st.file_uploader("Upload run_os.db", type=["db"], label_visibility="collapsed")
+        if uploaded is not None:
+            from src.database import DB_PATH
+            DB_PATH.write_bytes(uploaded.read())
+            st.cache_resource.clear()
+            st.success("Database uploaded. Reloading...")
+            st.rerun()
+
+    st.divider()
     st.caption(f"Cape Town Marathon: **{CAPE_TOWN_DATE}**")
     days_to_ct = (CAPE_TOWN_DATE - date.today()).days
     st.metric("Days to race", days_to_ct)
