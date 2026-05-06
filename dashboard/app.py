@@ -63,6 +63,30 @@ st.set_page_config(
     layout="wide",
 )
 
+# ── Password gate ────────────────────────────────────────────────────────────
+
+def _check_password() -> bool:
+    """Return True if the user has entered the correct password."""
+    if st.session_state.get("authenticated"):
+        return True
+    try:
+        correct = st.secrets["APP_PASSWORD"]
+    except Exception:
+        return True  # no password set, skip gate
+
+    st.title("🏃 Stefan · Run OS")
+    pwd = st.text_input("Password", type="password")
+    if st.button("Enter"):
+        if pwd == correct:
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("Wrong password.")
+    return False
+
+if not _check_password():
+    st.stop()
+
 # ── Auto-backfill on cold start ───────────────────────────────────────────────
 
 @st.cache_resource(show_spinner=False)
