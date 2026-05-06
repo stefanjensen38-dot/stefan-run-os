@@ -13,7 +13,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from src.database import get_connection, get_recent_activities, get_weekly_summary, seed_plan_targets, create_tables
+from src.database import get_connection, get_recent_activities, get_weekly_summary, seed_plan_targets, create_tables, upsert_activities, upsert_streams
 from src.metrics import (
     _fmt_time,
     get_cadence_trend,
@@ -82,10 +82,23 @@ if _state == "needs_backfill":
     st.info("No data yet. Click below to sync the last 6 months of activities from Strava.")
     if st.button("⟳ Initial Sync", type="primary"):
         import time as _time
-        six_months_ago = _time.time() - (180 * 24 * 3600)
-        with st.spinner("Syncing recent activities from Strava (~1 min)..."):
+        from src.strava_fetch import fetch_activities, parse_activities, fetch_activity_streams, parse_streams, _compute_weekly_summaries
+        ninety_days_ago = _time.time() - (90 * 24 * 3600)
+        with st.spinner("Syncing last 90 days from Strava..."):
             try:
-                sync(backfill=False)
+                raw = fetch_activities(after_timestamp=ninety_days_ago)
+                if raw:
+                    acts_df = parse_activities(raw)
+                    if not acts_df.empty:
+                        upsert_activities(acts_df)
+                        affected_weeks = set()
+                        for _, row in acts_df.iterrows():
+                            raw_s = fetch_activity_streams(int(row["id"]))
+                            streams_df = parse_streams(int(row["id"]), raw_s, row["distance_m"])
+                            if not streams_df.empty:
+                                upsert_streams(streams_df)
+                            affected_weeks.add(row["week_start"])
+                        _compute_weekly_summaries(list(affected_weeks))
                 st.rerun()
             except Exception as e:
                 st.error(f"Sync failed: {e}")
