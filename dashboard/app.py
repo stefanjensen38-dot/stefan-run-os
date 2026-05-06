@@ -79,9 +79,31 @@ def _bootstrap():
 
 _state = _bootstrap()
 if _state == "needs_backfill":
-    with st.spinner("First launch — syncing all activities from Strava (this takes ~2 min)..."):
+    # On cloud, only fetch last 6 months to avoid timeout — full history lives in local DB
+    import time as _time
+    six_months_ago = _time.time() - (180 * 24 * 3600)
+    with st.spinner("First launch — syncing recent activities from Strava (~1 min)..."):
         try:
-            sync(backfill=True)
+            from src.strava_fetch import fetch_activities, parse_activities, fetch_activity_streams, parse_streams, _compute_weekly_summaries
+            from src.database import upsert_activities, upsert_streams, seed_plan_targets
+            import pandas as pd
+            seed_plan_targets()
+            raw = fetch_activities(after_timestamp=six_months_ago)
+            if raw:
+                acts_df = parse_activities(raw)
+                if not acts_df.empty:
+                    upsert_activities(acts_df)
+                    affected_weeks = set()
+                    for _, row in acts_df.iterrows():
+                        streams_df = parse_streams(
+                            int(row["id"]),
+                            fetch_activity_streams(int(row["id"])),
+                            row["distance_m"]
+                        )
+                        if not streams_df.empty:
+                            upsert_streams(streams_df)
+                        affected_weeks.add(row["week_start"])
+                    _compute_weekly_summaries(list(affected_weeks))
             st.rerun()
         except Exception as e:
             st.error(f"Backfill failed: {e}")
