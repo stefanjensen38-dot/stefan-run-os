@@ -14,6 +14,7 @@ from src.database import (
     get_last_activity_date,
     upsert_activities,
     upsert_streams,
+    upsert_shoes,
     get_connection,
     PLAN_WEEK_ZERO,
 )
@@ -63,6 +64,34 @@ def fetch_activities(after_timestamp: float | None = None, per_page: int = 100) 
         page += 1
 
     return activities
+
+
+def fetch_shoes() -> pd.DataFrame:
+    """Fetch athlete gear (shoes) from Strava and return as a DataFrame."""
+    resp = requests.get(f"{BASE_URL}/athlete", headers=_headers())
+    if resp.status_code == 429:
+        print("Rate limited. Sleeping 15 minutes...")
+        time.sleep(900)
+        return fetch_shoes()
+    resp.raise_for_status()
+    athlete = resp.json()
+    shoes = athlete.get("shoes", [])
+
+    rows = []
+    for s in shoes:
+        gear_resp = requests.get(f"{BASE_URL}/gear/{s['id']}", headers=_headers())
+        if gear_resp.status_code == 200:
+            g = gear_resp.json()
+            rows.append({
+                "id":         g["id"],
+                "name":       g.get("name", ""),
+                "brand_name": g.get("brand_name", ""),
+                "model_name": g.get("model_name", ""),
+                "retired":    g.get("retired", False),
+                "distance_m": g.get("distance", 0),
+            })
+
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
 
 
 def fetch_activity_streams(activity_id: int) -> dict:
@@ -126,6 +155,7 @@ def parse_activities(raw_activities: list[dict]) -> pd.DataFrame:
             "week_start":           ws,
             "week_number":          _plan_week_number(ws),
             "year":                 start_dt.year,
+            "gear_id":              a.get("gear_id"),
         })
 
     return pd.DataFrame(rows) if rows else pd.DataFrame()
@@ -278,6 +308,13 @@ def sync(backfill: bool = False, streams_days: int = 120) -> None:
     all_weeks = set(acts_df["week_start"].tolist())
     print(f"Recomputing weekly summaries for {len(all_weeks)} week(s)...")
     _compute_weekly_summaries(list(all_weeks))
+
+    print("Syncing shoes...")
+    shoes_df = fetch_shoes()
+    if not shoes_df.empty:
+        upsert_shoes(shoes_df)
+        print(f"Saved {len(shoes_df)} shoes.")
+
     print("Sync complete.")
 
 

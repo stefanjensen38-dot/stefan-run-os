@@ -53,7 +53,7 @@ def get_authorization_url() -> str:
         "redirect_uri": redirect_uri,
         "response_type": "code",
         "approval_prompt": "auto",
-        "scope": "activity:read_all",
+        "scope": "activity:read_all,profile:read_all",
     }
     return f"{AUTH_URL}?{urlencode(params)}"
 

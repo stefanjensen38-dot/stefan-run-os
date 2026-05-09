@@ -78,6 +78,20 @@ def create_tables() -> None:
             notes VARCHAR
         )
     """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS shoes (
+            id VARCHAR PRIMARY KEY,
+            name VARCHAR,
+            brand_name VARCHAR,
+            model_name VARCHAR,
+            retired BOOLEAN,
+            distance_m DOUBLE
+        )
+    """)
+    # Add gear_id to activities if not already present
+    cols = [r[0] for r in con.execute("PRAGMA table_info(activities)").fetchall()]
+    if "gear_id" not in cols:
+        con.execute("ALTER TABLE activities ADD COLUMN gear_id VARCHAR")
     con.close()
     print("Tables created.")
 
@@ -94,6 +108,31 @@ def upsert_streams(df: pd.DataFrame) -> None:
     con = get_connection()
     con.execute("INSERT OR REPLACE INTO activity_streams SELECT * FROM df")
     con.close()
+
+
+def upsert_shoes(df: pd.DataFrame) -> None:
+    """Insert or replace shoes rows from a DataFrame."""
+    con = get_connection()
+    con.execute("INSERT OR REPLACE INTO shoes SELECT * FROM df")
+    con.close()
+
+
+def get_shoes() -> pd.DataFrame:
+    """Return all shoes joined with km logged from activities."""
+    con = get_connection()
+    df = con.execute("""
+        SELECT s.*, COALESCE(a.logged_km, 0) as logged_km
+        FROM shoes s
+        LEFT JOIN (
+            SELECT gear_id, SUM(distance_m) / 1000 as logged_km
+            FROM activities
+            WHERE gear_id IS NOT NULL
+            GROUP BY gear_id
+        ) a ON s.id = a.gear_id
+        ORDER BY s.retired, logged_km DESC
+    """).df()
+    con.close()
+    return df
 
 
 def get_last_activity_date():

@@ -13,7 +13,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from src.database import get_connection, get_recent_activities, get_weekly_summary, seed_plan_targets, create_tables, upsert_activities, upsert_streams
+from src.database import get_connection, get_recent_activities, get_weekly_summary, seed_plan_targets, create_tables, upsert_activities, upsert_streams, get_shoes
 from src.metrics import (
     _fmt_time,
     get_cadence_trend,
@@ -166,8 +166,8 @@ with st.sidebar:
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "Overview", "Zone Compliance", "Plan vs Actual", "Race Predictor", "Activity Detail"
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "Overview", "Zone Compliance", "Plan vs Actual", "Race Predictor", "Activity Detail", "Shoes"
 ])
 
 
@@ -637,3 +637,71 @@ with tab5:
                     height=320,
                 )
                 st.plotly_chart(fig6, use_container_width=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 6 — Shoes
+# ══════════════════════════════════════════════════════════════════════════════
+
+with tab6:
+    st.subheader("Shoe Tracker")
+
+    shoes_df = get_shoes()
+
+    if shoes_df.empty:
+        st.info("No shoes found. Hit 'Sync Strava' in the sidebar to fetch your gear.")
+    else:
+        default_limit = st.slider("Default replacement distance (km)", 500, 1200, 800, step=50)
+
+        active = shoes_df[shoes_df["retired"] == False]
+        retired = shoes_df[shoes_df["retired"] == True]
+
+        for _, shoe in active.iterrows():
+            logged = round(shoe["logged_km"], 1)
+            limit = default_limit
+            pct = min(logged / limit, 1.0)
+
+            if pct >= 0.9:
+                color = "#ef4444"
+                status = "Replace soon"
+            elif pct >= 0.7:
+                color = "#f59e0b"
+                status = "Getting worn"
+            else:
+                color = "#22c55e"
+                status = "Good"
+
+            label = shoe["name"] or f"{shoe['brand_name']} {shoe['model_name']}".strip() or shoe["id"]
+
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.markdown(f"**{label}**")
+                st.progress(pct, text=f"{logged} km / {limit} km — {status}")
+            with col2:
+                remaining = max(limit - logged, 0)
+                st.metric("Remaining", f"{remaining:.0f} km")
+
+            # Recent runs in this shoe
+            con = get_connection()
+            recent_runs = con.execute("""
+                SELECT start_date, name, distance_m / 1000 as km
+                FROM activities
+                WHERE gear_id = ?
+                ORDER BY start_date DESC
+                LIMIT 5
+            """, [shoe["id"]]).df()
+            con.close()
+
+            if not recent_runs.empty:
+                with st.expander("Recent runs in this shoe"):
+                    recent_runs["start_date"] = recent_runs["start_date"].astype(str).str[:10]
+                    recent_runs["km"] = recent_runs["km"].round(1)
+                    st.dataframe(recent_runs, use_container_width=True, hide_index=True)
+
+            st.divider()
+
+        if not retired.empty:
+            with st.expander(f"Retired shoes ({len(retired)})"):
+                for _, shoe in retired.iterrows():
+                    label = shoe["name"] or f"{shoe['brand_name']} {shoe['model_name']}".strip()
+                    st.markdown(f"~~{label}~~ — {shoe['logged_km']:.0f} km logged")
